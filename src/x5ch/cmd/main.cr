@@ -72,7 +72,10 @@ module X5ch
       # rawモード中(selector/pager画面)のCtrl+Cはバイト0x03として各所で検知され
       # Action::Interrupt/InterruptedFlow として伝播する。rawモードを抜けている間
       # (メニュー間のネットワーク取得中)はOSのSIGINT/SIGTERMとして届くため、ここでも捕捉する。
-      Process.on_interrupt { cleanup_and_exit(worker, cfg.pid_file, lock_file) }
+      # Process.on_interrupt はCrystal 1.12以降で非推奨(on_terminateを使うよう指示される)。
+      # on_terminate は Process::ExitReason を受け取るが、割り込み理由に関わらず
+      # 同じ後始末を行えばよいため、ここでは引数を使わない。
+      Process.on_terminate { |_reason| cleanup_and_exit(worker, cfg.pid_file, lock_file) }
       Signal::TERM.trap { cleanup_and_exit(worker, cfg.pid_file, lock_file) }
 
       begin
