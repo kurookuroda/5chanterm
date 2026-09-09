@@ -150,8 +150,17 @@ Most tests were re-run 3× to rule out fiber-scheduling flakiness.
    already-closed channel; Go's channels return the zero value instead.
 5. `require` only accepts relative paths or shard names, never absolute
    filesystem paths.
-6. A `Regex` literal's `/m` modifier means DOTALL (Ruby/Onigmo convention),
-   not line-anchored multiline as in many other regex flavors.
+6. A `Regex` literal's `/m` modifier enables DOTALL (`.` matches newlines,
+   Ruby/Onigmo convention) **and, distinctly from Ruby, also switches `^`/`$`
+   from matching only string-start/end to matching at every line boundary.**
+   In Ruby, `^`/`$` are *always* line anchors regardless of any flag, so this
+   second effect is invisible there. In Crystal, `^`/`$` are **not** line
+   anchors by default — only `/m` turns that on, at the same time as DOTALL.
+   Confirmed directly: `/^line2$/ =~ "line1\nline2\nline3"` is `nil`, while
+   `/^line2$/m =~` the same string returns a match. So Crystal's `/m` isn't
+   simply "DOTALL instead of multiline" — it's DOTALL *and* multiline
+   together, a combination that doesn't match either Ruby's or PCRE's typical
+   `/m`/`/s` split.
 7. `next` cannot be used inside a `Proc` literal.
 8. Reusing a variable name across unrelated top-level `spawn`/`select` blocks
    in one script file unifies its inferred type across the whole file, which
