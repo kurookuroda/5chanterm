@@ -2,6 +2,51 @@ require "termios"
 
 module X5ch
   module Terminal
+    # KeyReader は標準入力等から1バイトずつ読み続ける背景Fiberを1本だけ持つ、
+    # プロセス寿命を通じて使い回すための共有リーダー。
+    #
+    # 経緯: 以前は Selector.run / (旧設計の) Pager が呼び出されるたびに
+    # 独自の背景Fiberを起動していたが、そのFiberには止める手段が無く、
+    # 呼び出し終了後も生き残って次の画面の入力を横取りする実バグがあった
+    # (Go版 selector.go の startKeyReader も同じ構造で、この欠陥は
+    # Go版オリジナルの設計に由来する)。PTYでの実測で「1回目のEnterが
+    # 消え、2回目でようやく反応する」という形で確実に再現することを確認済み。
+    # 対策として、画面遷移のたびに使い捨てのFiberを作るのをやめ、
+    # main.cr が起動時に1つだけ生成した KeyReader を全画面で使い回す設計にした。
+    class KeyReader
+      def initialize(@io : IO)
+        @key_channel = Channel(UInt8).new
+        @error_channel = Channel(Exception).new(1)
+        spawn do
+          loop do
+            byte = @io.read_byte
+            if byte.nil?
+              @error_channel.send(IO::EOFError.new)
+              break
+            end
+            @key_channel.send(byte)
+          end
+        rescue ex
+          @error_channel.send(ex)
+        end
+      end
+
+      # 1バイト読めるまでブロックする。EOF/IOエラー時は例外を送出する。
+      def read_byte : UInt8
+        select
+        when b = @key_channel.receive
+          b
+        when ex = @error_channel.receive
+          raise ex
+        end
+      end
+
+      # Selector.run 等、キー用チャネルとエラー用チャネルを直接必要とする箇所向け。
+      def channels : {Channel(UInt8), Channel(Exception)}
+        {@key_channel, @error_channel}
+      end
+    end
+
     # --- raw mode ---
     #
     # Crystal 1.11.2 の IO::FileDescriptor#raw!/#cooked! は、内部の

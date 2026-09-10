@@ -121,10 +121,10 @@ module X5ch
       # 端末をrawモードにし、キー入力によるスクロール操作を受け付ける。
       # 'q'で終了し、その時点の閲覧位置を Result として返す(コンテキストが無ければnil)。
       #
-      # Go版と同じく単純な同期ブロッキング読み取りループにしている
-      # (バックグラウンドfiber+チャネル方式にはしていない。読み取り箇所が
-      #  1つだけなので、その方が競合の心配がなくシンプルで確実)。
-      def start(input : IO, output : IO, fd : Int32) : Result?
+      # reader は main.cr が起動時に1つだけ生成し、全画面で使い回す共有KeyReader
+      # (Selector.run と同じ理由——画面ごとに専用の読み取りFiberを作ると、
+      #  前の画面のFiberが次の画面の入力を横取りする実バグがあったため)。
+      def start(reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Result?
         original_termios = X5ch::Terminal.enable_raw_mode(fd)
 
         begin
@@ -138,8 +138,12 @@ module X5ch
             max_scroll = Math.max(@lines.size - rows, 0)
             render(output, current_line, rows, cols)
 
-            byte = input.read_byte
-            return nil if byte.nil?
+            byte =
+              begin
+                reader.read_byte
+              rescue
+                return nil
+              end
 
             current_context = context_at(current_line, rows)
 
@@ -165,10 +169,19 @@ module X5ch
             when 'G'.ord
               current_line = max_scroll
             when 0x1b # ESC
-              b2 = input.read_byte
-              next if b2.nil? || b2 != '['.ord
-              b3 = input.read_byte
-              next if b3.nil?
+              b2 =
+                begin
+                  reader.read_byte
+                rescue
+                  next
+                end
+              next if b2 != '['.ord
+              b3 =
+                begin
+                  reader.read_byte
+                rescue
+                  next
+                end
               case b3
               when 'A'.ord
                 current_line -= 1 if current_line > 0

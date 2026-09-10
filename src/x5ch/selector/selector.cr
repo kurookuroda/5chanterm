@@ -108,26 +108,11 @@ module X5ch
       end
     end
 
-    def self.start_key_reader(io : IO) : {Channel(UInt8), Channel(Exception)}
-      key_ch = Channel(UInt8).new
-      err_ch = Channel(Exception).new(1)
-      spawn do
-        loop do
-          byte = io.read_byte
-          if byte.nil?
-            err_ch.send(IO::EOFError.new)
-            break
-          end
-          key_ch.send(byte)
-        end
-      rescue ex
-        err_ch.send(ex)
-      end
-      {key_ch, err_ch}
-    end
-
     # ページング・数字選択・検索・各種アクションキーを処理するメインループ。
-    def self.run(input : IO, output : IO, fd : Int32, cfg : Config(T)) : Result(T) forall T
+    # reader は main.cr がプロセス起動時に1つだけ生成し、全画面で使い回す共有KeyReader。
+    # 呼び出しのたびに新しい背景Fiberを作らないことで、前の画面のFiberが次の画面の
+    # 入力を横取りするバグ(過去にあった実バグ)を避けている。
+    def self.run(output : IO, fd : Int32, cfg : Config(T), reader : X5ch::Terminal::KeyReader) : Result(T) forall T
       return Result(T).new(Action::Back, nil, 0) if cfg.items.empty?
 
       page_size = cfg.page_size <= 0 ? 20 : cfg.page_size
@@ -135,7 +120,7 @@ module X5ch
       original_termios = X5ch::Terminal.enable_raw_mode(fd)
 
       begin
-        key_ch, err_ch = start_key_reader(input)
+        key_ch, err_ch = reader.channels
         sio = TermIO.new(key_ch, err_ch, output)
 
         original_items = cfg.items

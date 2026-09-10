@@ -9,6 +9,7 @@ require "../history/manager"
 require "../discord/manager"
 require "../transfer/worker"
 require "../selector/selector"
+require "../terminal/terminal"
 
 module X5ch
   module Cmd
@@ -65,9 +66,13 @@ module X5ch
       discord_mgr = X5ch::Discord::Manager.new(cfg.discord_bot_token, cfg.discord_channel_id)
       worker = X5ch::Transfer::Worker.new(browser, discord_mgr, hist, cfg.queue_file)
 
-      input = STDIN
       output = STDOUT
       fd = STDIN.fd
+      # プロセス全体を通じて1つだけ生成し、全画面(Selector.run/Pager#start/wait_for_key)で
+      # 使い回す共有KeyReader。画面遷移のたびに専用の読み取りFiberを作ると、
+      # 前の画面のFiberが次の画面の入力を横取りする実バグがあったため
+      # (詳細は KeyReader のコメントを参照)、ここで一度だけ生成して使い回す。
+      reader = X5ch::Terminal::KeyReader.new(STDIN)
 
       # rawモード中(selector/pager画面)のCtrl+Cはバイト0x03として各所で検知され
       # Action::Interrupt/InterruptedFlow として伝播する。rawモードを抜けている間
@@ -79,7 +84,7 @@ module X5ch
       Signal::TERM.trap { cleanup_and_exit(worker, cfg.pid_file, lock_file) }
 
       begin
-        run_menu_loop(browser, hist, worker, discord_mgr, input, output, fd)
+        run_menu_loop(browser, hist, worker, discord_mgr, reader, output, fd)
       rescue InterruptedFlow
         cleanup_and_exit(worker, cfg.pid_file, lock_file)
         return
@@ -108,7 +113,7 @@ module X5ch
     end
 
     # メインメニュー(カテゴリ一覧+最近読んだスレッド)のループ。
-    def self.run_menu_loop(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, input : IO, output : IO, fd : Int32) : Nil
+    def self.run_menu_loop(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Nil
       last_cat_page = 0
 
       loop do
@@ -132,12 +137,12 @@ module X5ch
         cfg.start_page = last_cat_page
         cfg.status_line = ->{ worker.status_string }
         cfg.search_label = "全スレ検索"
-        cfg.on_global_search = ->(keyword : String) { run_global_search(browser, hist, worker, discord_mgr, keyword, input, output, fd) }
+        cfg.on_global_search = ->(keyword : String) { run_global_search(browser, hist, worker, discord_mgr, keyword, reader, output, fd) }
         cfg.on_queue_manage = ->(sio : Selector::TermIO) { manage_queue(sio, worker) }
         cfg.on_history_manage = ->(sio : Selector::TermIO) { manage_history(sio, hist) }
         cfg.help_text = help_text("category")
 
-        cat_result = Selector.run(input, output, fd, cfg)
+        cat_result = Selector.run(output, fd, cfg, reader)
         last_cat_page = cat_result.page
 
         case cat_result.action
@@ -157,15 +162,15 @@ module X5ch
             sleep 1.seconds
             next
           end
-          show_recent_stream(browser, hist, recent, input, output, fd)
+          show_recent_stream(browser, hist, recent, reader, output, fd)
           next
         end
 
-        run_board_loop(browser, hist, worker, discord_mgr, entry.category.not_nil!, input, output, fd)
+        run_board_loop(browser, hist, worker, discord_mgr, entry.category.not_nil!, reader, output, fd)
       end
     end
 
-    def self.run_board_loop(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, cat : X5ch::FivechBrowser::Category, input : IO, output : IO, fd : Int32) : Nil
+    def self.run_board_loop(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, cat : X5ch::FivechBrowser::Category, reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Nil
       last_board_page = 0
 
       loop do
@@ -182,7 +187,7 @@ module X5ch
         cfg.on_queue_manage = ->(sio : Selector::TermIO) { manage_queue(sio, worker) }
         cfg.help_text = help_text("board")
 
-        board_result = Selector.run(input, output, fd, cfg)
+        board_result = Selector.run(output, fd, cfg, reader)
 
         case board_result.action
         when .quit?, .back?
@@ -196,11 +201,11 @@ module X5ch
         last_board_page = board_result.page
         board = board_result.value.not_nil!
 
-        run_thread_loop(browser, hist, worker, discord_mgr, board, input, output, fd)
+        run_thread_loop(browser, hist, worker, discord_mgr, board, reader, output, fd)
       end
     end
 
-    def self.run_thread_loop(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, board : X5ch::FivechBrowser::Board, input : IO, output : IO, fd : Int32) : Nil
+    def self.run_thread_loop(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, board : X5ch::FivechBrowser::Board, reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Nil
       last_thread_page = 0
       force_reload = false
 
@@ -236,7 +241,7 @@ module X5ch
         cfg.on_queue_manage = ->(sio : Selector::TermIO) { manage_queue(sio, worker) }
         cfg.help_text = help_text("thread")
 
-        thread_result = Selector.run(input, output, fd, cfg)
+        thread_result = Selector.run(output, fd, cfg, reader)
         last_thread_page = thread_result.page
 
         case thread_result.action
@@ -250,25 +255,25 @@ module X5ch
         end
 
         t = thread_result.value.not_nil!.thread
-        show_thread(browser, hist, t, input, output, fd)
+        show_thread(browser, hist, t, reader, output, fd)
       end
     end
 
     # カテゴリ画面からの全板検索('s')。結果一覧を別のSelector.runで表示し、
     # 選択されたスレッドを show_thread で読む、というネストしたループ。
-    def self.run_global_search(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, keyword : String, input : IO, output : IO, fd : Int32) : Bool
+    def self.run_global_search(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, worker : Transfer::Worker, discord_mgr : X5ch::Discord::Manager, keyword : String, reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Bool
       results =
         begin
           browser.search_global(keyword)
         rescue ex
           output.puts "検索エラー: #{ex.message}"
-          wait_for_key(input)
+          wait_for_key(reader)
           return false
         end
 
       if results.empty?
         output.puts "見つかりませんでした。"
-        wait_for_key(input)
+        wait_for_key(reader)
         return false
       end
 
@@ -288,7 +293,7 @@ module X5ch
         cfg.on_queue_manage = ->(sio : Selector::TermIO) { manage_queue(sio, worker) }
         cfg.help_text = help_text("thread")
 
-        result = Selector.run(input, output, fd, cfg)
+        result = Selector.run(output, fd, cfg, reader)
         last_page = result.page
 
         case result.action
@@ -297,7 +302,7 @@ module X5ch
         when .interrupt?
           return true
         when .selected?
-          show_thread(browser, hist, result.value.not_nil!.thread, input, output, fd)
+          show_thread(browser, hist, result.value.not_nil!.thread, reader, output, fd)
         end
       end
     end

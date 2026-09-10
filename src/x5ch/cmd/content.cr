@@ -12,23 +12,41 @@ module X5ch
     # は呼び出し元が保持する同じインスタンスにも反映される。これは browser.cr の
     # get_thread_data が既に t.url を同様に書き換える設計と一貫している
     # (呼び出し元のスレッド一覧が実態と同期される、という意図せざる利点でもある)。
-    def self.show_thread(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, t : X5ch::FivechBrowser::ThreadInfo, input : IO, output : IO, fd : Int32) : Nil
+    def self.show_thread(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, t : X5ch::FivechBrowser::ThreadInfo, reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Nil
       saved = hist.get_last_read(t.board_url, t.dat_file)
       t.last_read = saved if saved > 0
 
       output.puts("スレッド取得中...")
       output.flush
+
+      fetch_failure_message = nil.as(String?)
       posts =
         begin
           browser.get_thread_data(t)
-        rescue
+        rescue ex : X5ch::FivechBrowser::ThreadGoneError
+          fetch_failure_message = "dat落ちしています"
+          [] of X5ch::FivechBrowser::Post
+        rescue ex : X5ch::FivechBrowser::BrowserError
+          # FetchErrorをラップしたもの。通信タイムアウト・接続エラー・HTTPエラー・
+          # URL組み立て失敗などが全てここに来る(dat落ちではない)。
+          fetch_failure_message = "通信エラー: #{ex.message}"
+          [] of X5ch::FivechBrowser::Post
+        rescue ex
+          fetch_failure_message = "予期しないエラー: #{ex.class}: #{ex.message}"
           [] of X5ch::FivechBrowser::Post
         end
 
       if posts.empty?
-        output.puts("取得失敗またはdat落ち")
+        if fetch_failure_message
+          output.puts(fetch_failure_message)
+        else
+          # 例外は出ていない(fetch自体は成功しdat落ち表示も無い)のに0件だった場合。
+          # parse_posts側がHTML構造の変化などで一致しなかった可能性が高い、という
+          # 診断用の別メッセージ(「dat落ちまたは取得失敗」という曖昧な表示にしない)。
+          output.puts("取得はできましたが、レスを1件も抽出できませんでした(パース不一致の可能性)")
+        end
         output.flush
-        wait_for_key(input)
+        wait_for_key(reader)
         return
       end
       t.count = posts.size
@@ -49,7 +67,7 @@ module X5ch
 
       result =
         begin
-          Pager::Pager.new(content).start(input, output, fd)
+          Pager::Pager.new(content).start(reader, output, fd)
         rescue
           nil
         end
@@ -63,7 +81,7 @@ module X5ch
     end
 
     # 複数スレッドの新着をまとめて表示する。Ruby版 FiveChBrowser#show_recent_stream に対応。
-    def self.show_recent_stream(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, threads : Array(X5ch::History::RecentThread), input : IO, output : IO, fd : Int32) : Nil
+    def self.show_recent_stream(browser : X5ch::FivechBrowser::Browser, hist : X5ch::History::Manager, threads : Array(X5ch::History::RecentThread), reader : X5ch::Terminal::KeyReader, output : IO, fd : Int32) : Nil
       content = [] of Pager::ContentItem
 
       threads.each_with_index do |rt, idx|
@@ -74,8 +92,14 @@ module X5ch
         posts =
           begin
             browser.get_thread_data(th)
-          rescue
-            content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "取得失敗: #{th.title}")
+          rescue ex : X5ch::FivechBrowser::ThreadGoneError
+            content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "dat落ち: #{th.title}")
+            next
+          rescue ex : X5ch::FivechBrowser::BrowserError
+            content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "通信エラー(#{th.title}): #{ex.message}")
+            next
+          rescue ex
+            content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "予期しないエラー(#{th.title}): #{ex.class}")
             next
           end
         th.count = posts.size
@@ -106,7 +130,7 @@ module X5ch
 
       result =
         begin
-          Pager::Pager.new(content).start(input, output, fd)
+          Pager::Pager.new(content).start(reader, output, fd)
         rescue
           nil
         end
@@ -119,8 +143,9 @@ module X5ch
       end
     end
 
-    def self.wait_for_key(input : IO) : Nil
-      input.read_byte
+    def self.wait_for_key(reader : X5ch::Terminal::KeyReader) : Nil
+      reader.read_byte
+    rescue
     end
   end
 end

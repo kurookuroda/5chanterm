@@ -120,6 +120,24 @@ Most tests were re-run 3× to rule out fiber-scheduling flakiness.
   (single synchronous blocking read loop, `ContentItem`-styled-line renderer,
   `contextAt`-based `Result{thread, res}`) after this was caught by a test
   failure and a careful re-read.
+- **`selector/selector.cr`, `terminal/terminal.cr`, `cmd/content.cr`,
+  `cmd/main.cr`**: a separate, real, confirmed bug — inherited directly from
+  `x5ch-go/selector/selector.go`'s `startKeyReader`, not introduced by this
+  port — where every call to `Selector.run` spawned a brand-new background
+  reader goroutine/fiber with **no way to stop it**. When the call returned,
+  that reader stayed alive, blocked on the next byte, and competed with
+  whatever read the terminal input next (a following `Selector.run`,
+  `Pager#start`, or `content.cr`'s `wait_for_key`) — silently "eating" the
+  next keypress. Reproduced deterministically (5/5 runs) via PTY: a
+  selection's Enter key would vanish, requiring a second Enter to proceed.
+  Fixed by replacing the "spawn a fiber per call" design with a single
+  `Terminal::KeyReader` created once at program start and threaded through
+  every screen (`Selector.run`, `Pager#start`, `wait_for_key`) for the rest of
+  the process's lifetime — since a graceful "please stop" signal can't
+  interrupt a fiber already blocked in a real blocking read, avoiding a second
+  reader entirely is the only complete fix. Verified fixed (5/5 clean runs)
+  with the same repro harness, and all previously-passing tests re-verified
+  against the new signatures.
 - **`terminal/terminal.cr`**: `IO::FileDescriptor#raw!`/`#cooked!` do not
   durably change terminal mode in Crystal 1.11.2 — an internal `ensure`
   always reverts them immediately. Replaced with hand-rolled
@@ -165,3 +183,9 @@ Most tests were re-run 3× to rule out fiber-scheduling flakiness.
 8. Reusing a variable name across unrelated top-level `spawn`/`select` blocks
    in one script file unifies its inferred type across the whole file, which
    can produce spurious type errors far from the real problem.
+9. A background fiber blocked in a real blocking read cannot be stopped by a
+   polite "please exit" signal alone — it won't notice until its current read
+   call returns, by which point it may have already consumed data meant for
+   someone else. If a reader like this must be reused across calls, create it
+   once and share it; don't spawn a fresh one per call intending to discard
+   the old one afterward.
