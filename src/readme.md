@@ -16,6 +16,11 @@ the full interactive TUI (menus, boards, threads, pager, search, Discord
 transfer queue, history management) and the non-interactive subcommands
 (`search`, `read`, `export`).
 
+Beyond the Go source, this port adds an **in-TUI thread export** feature (see
+below) that writes a Markdown/JSON snapshot of a thread to disk from directly
+within the interactive browser, without going through the `export`
+subcommand.
+
 ## Layout
 
 ```
@@ -61,6 +66,37 @@ under `$HOME`):
 | `X5CH_QUEUE_FILE` | default `~/.x5ch_queue.json` |
 | `X5CH_LOCK_FILE` | default `~/.x5ch.lock` |
 | `X5CH_PID_FILE` | default `~/.x5ch.pid` |
+| `X5CH_EXPORT_DIR` | default `./x5ch_exports` (relative to the directory `x5ch` is run from — deliberately *not* `$HOME`, see below) |
+
+## Thread export (Markdown/JSON)
+
+From inside the interactive TUI, any thread can be exported to a file without
+using the `export` subcommand:
+
+- **While reading a thread** (in the pager): press `e` to save it as
+  Markdown, or `E` to save it as JSON.
+- **From a thread list or search-result list** (before opening a thread):
+  press `e`/`E`, then enter the row number of the thread you want — same
+  interaction pattern as the existing `m` (Discord queue) and `H` (history
+  delete) per-row actions.
+
+Both entry points re-fetch the thread via
+`FivechBrowser::Browser#export_thread_data` (the same archival fetch the
+`export` subcommand uses — richer than the display data already on screen)
+and write one file to `X5CH_EXPORT_DIR`, named
+`{dat_file}_{sanitized thread title}.{md,json}`. The JSON file is exactly the
+`export` subcommand's `ExportResult` structure (`source`/`thread`/`posts`);
+the Markdown file (`ExportResult#to_markdown` in `fivechbrowser/export.cr`) is
+a human-readable rendering of the same data — a metadata header followed by
+one section per post.
+
+`X5CH_EXPORT_DIR` defaults to `x5ch_exports/` under the **current working
+directory** (where `x5ch` was launched from), not `$HOME` like the other
+paths in the table above. This was a deliberate deviation: in sandboxed dev
+environments (Codespaces, Colab, etc.) the home directory can live on a
+different mount than the one the user is actually browsing, making
+home-relative output silently invisible even though the file was written
+successfully.
 
 ## Testing approach
 
