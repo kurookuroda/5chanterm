@@ -55,6 +55,12 @@ module X5ch
       end
 
       # rawモードのまま、Enterまで1行を手動エコー・バックスペース処理しながら読む。
+      #
+      # Go版オリジナルの ReadLine は1バイトずつ rune(b) に変換しており、日本語等の
+      # マルチバイトUTF-8入力を正しく再構成できず文字化けする欠陥がある(実際に検証・
+      # 報告された)。「Go版に忠実」よりユーザーが日本語で検索できることの方が重要な
+      # ため、ここはGo版をそのまま踏襲せず、UTF-8のマルチバイト列を正しく再構成する
+      # read_char を使う設計に修正している。
       def read_line : String
         buf = [] of Char
         loop do
@@ -71,10 +77,39 @@ module X5ch
           when 0x03
             raise InterruptedError.new
           else
-            ch = b.chr
+            ch = read_char(b)
             buf << ch
             print(ch.to_s)
           end
+        end
+      end
+
+      # first は既に読み込み済みの先頭バイト。UTF-8の先頭バイトのビットパターンから
+      # 続きバイト数を判定し、必要な分だけ read_key で追加読み込みして1文字に組み立てる。
+      private def read_char(first : UInt8) : Char
+        return first.chr if first < 0x80 # ASCII(1バイト)はそのまま
+
+        extra_bytes =
+          if (first & 0b1110_0000) == 0b1100_0000
+            1
+          elsif (first & 0b1111_0000) == 0b1110_0000
+            2
+          elsif (first & 0b1111_1000) == 0b1111_0000
+            3
+          else
+            0 # 不正な先頭バイト。ベストエフォートで1バイトのまま扱う
+          end
+
+        return first.chr if extra_bytes == 0
+
+        bytes = Bytes.new(extra_bytes + 1)
+        bytes[0] = first
+        extra_bytes.times { |i| bytes[i + 1] = read_key }
+
+        begin
+          String.new(bytes).each_char.first
+        rescue
+          '?' # 不正なUTF-8バイト列だった場合のフォールバック
         end
       end
     end
