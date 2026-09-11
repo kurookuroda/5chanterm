@@ -12,7 +12,16 @@ require "../transfer/interfaces"
 
 module X5ch
   module FivechBrowser
+    # BrowserError は Browser 層での失敗を表す。url には「実際に失敗した(組み立てた/
+    # 取得しようとした)URL」を可能な限り持たせる。ThreadInfo#url は fetch成功後にしか
+    # 更新されないため、失敗時のURLを示すには使えない(実測で確認済み) — 例外自体に
+    # 持たせることで、呼び出し側は常に「今回の失敗の対象URL」を正確に取得できる。
     class BrowserError < Exception
+      getter url : String?
+
+      def initialize(message : String, @url : String? = nil, cause : Exception? = nil)
+        super(message, cause)
+      end
     end
 
     THREAD_GONE_MESSAGE = "スレッドはdat落ちしています"
@@ -94,7 +103,7 @@ module X5ch
           begin
             @fetcher.fetch(read_url)
           rescue ex : FetchError
-            raise BrowserError.new("スレッド取得に失敗しました: #{ex.message}")
+            raise BrowserError.new("スレッド取得に失敗しました: #{ex.message}", read_url, ex)
           end
 
         html = X5ch::FivechBrowser.decode_to_utf8(body)
@@ -105,7 +114,7 @@ module X5ch
           begin
             URI.parse(board_url)
           rescue ex : URI::Error
-            raise BrowserError.new("board_urlの解析に失敗: #{ex.message}")
+            raise BrowserError.new("board_urlの解析に失敗: #{ex.message}", board_url, ex)
           end
         dat_num = dat_file.sub(/\.dat$/, "")
         thread_external_id = "5ch:#{uri.authority}#{uri.path}#{dat_num}"
@@ -148,7 +157,7 @@ module X5ch
           begin
             @fetcher.fetch(read_url)
           rescue ex : FetchError
-            raise BrowserError.new("スレッド取得に失敗しました: #{ex.message}")
+            raise BrowserError.new("スレッド取得に失敗しました: #{ex.message}", read_url, ex)
           end
 
         html = X5ch::FivechBrowser.decode_to_utf8(body)
@@ -171,15 +180,15 @@ module X5ch
         begin
           URI.parse(board_url)
         rescue ex : URI::Error
-          raise BrowserError.new("board_urlの解析に失敗: #{ex.message}")
+          raise BrowserError.new("board_urlの解析に失敗: #{ex.message}", board_url, ex)
         end
 
       segments = uri.path.split('/').reject(&.empty?)
-      raise BrowserError.new("board_urlから板名を特定できません: #{board_url}") if segments.empty?
+      raise BrowserError.new("board_urlから板名を特定できません: #{board_url}", board_url) if segments.empty?
       board_name = segments.last
 
       dat_num = dat_file.sub(/\.dat$/, "")
-      raise BrowserError.new("不正なdat_file: #{dat_file}") unless dat_num.to_i64?
+      raise BrowserError.new("不正なdat_file: #{dat_file}", board_url) unless dat_num.to_i64?
 
       "#{uri.scheme}://#{uri.authority}/test/read.cgi/#{board_name}/#{dat_num}/"
     end

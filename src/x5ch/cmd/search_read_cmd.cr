@@ -70,6 +70,9 @@ module X5ch
       property error : String?
       @[JSON::Field(key: "error_type", emit_null: false)]
       property error_type : String?
+      # BrowserErrorが実際に失敗したURLを持っている場合にのみ埋まる(診断用)。
+      @[JSON::Field(key: "error_url", emit_null: false)]
+      property error_url : String?
       @[JSON::Field(emit_null: false)]
       property results : Array(JsonSearchResult)?
       @[JSON::Field(emit_null: false)]
@@ -81,6 +84,7 @@ module X5ch
         @ok : Bool,
         @error : String? = nil,
         @error_type : String? = nil,
+        @error_url : String? = nil,
         @results : Array(JsonSearchResult)? = nil,
         @thread : JsonThread? = nil,
         @posts : Array(JsonPost)? = nil,
@@ -93,6 +97,11 @@ module X5ch
       return "thread_gone" if ex.is_a?(X5ch::FivechBrowser::ThreadGoneError)
       return "network" if ex.is_a?(X5ch::FivechBrowser::NetworkFetchError)
       "other"
+    end
+
+    # BrowserError(の派生含む)が失敗対象のURLを持っていればそれを返す。診断用。
+    def self.extract_error_url(ex : Exception) : String?
+      ex.is_a?(X5ch::FivechBrowser::BrowserError) ? ex.url : nil
     end
 
     def self.write_envelope(env : JsonEnvelope, io : IO = STDOUT) : Nil
@@ -114,7 +123,7 @@ module X5ch
         begin
           browser.search_global(keyword)
         rescue ex
-          write_envelope(JsonEnvelope.new(ok: false, error: ex.message || "", error_type: classify_error_type(ex)), STDERR)
+          write_envelope(JsonEnvelope.new(ok: false, error: ex.message || "", error_type: classify_error_type(ex), error_url: extract_error_url(ex)), STDERR)
           exit(1)
         end
 
@@ -141,7 +150,7 @@ module X5ch
         begin
           browser.get_thread_data(t)
         rescue ex
-          write_envelope(JsonEnvelope.new(ok: false, error: ex.message || "", error_type: classify_error_type(ex)), STDERR)
+          write_envelope(JsonEnvelope.new(ok: false, error: ex.message || "", error_type: classify_error_type(ex), error_url: extract_error_url(ex)), STDERR)
           exit(1)
         end
 

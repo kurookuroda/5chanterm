@@ -29,7 +29,10 @@ module X5ch
         rescue ex : X5ch::FivechBrowser::BrowserError
           # FetchErrorをラップしたもの。通信タイムアウト・接続エラー・HTTPエラー・
           # URL組み立て失敗などが全てここに来る(dat落ちではない)。
-          fetch_failure_message = "通信エラー: #{ex.message}"
+          # t.url は fetch成功後にしか更新されないため失敗時のURL表示には使えない
+          # (実測で確認済み) — 例外自体が持つ ex.url(実際に失敗した対象URL)を使う。
+          url_part = ex.url ? "\nURL: #{ex.url}" : ""
+          fetch_failure_message = "通信エラー: #{ex.message}#{url_part}"
           [] of X5ch::FivechBrowser::Post
         rescue ex
           fetch_failure_message = "予期しないエラー: #{ex.class}: #{ex.message}"
@@ -96,7 +99,8 @@ module X5ch
             content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "dat落ち: #{th.title}")
             next
           rescue ex : X5ch::FivechBrowser::BrowserError
-            content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "通信エラー(#{th.title}): #{ex.message}")
+            url_part = ex.url ? " [URL: #{ex.url}]" : ""
+            content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "通信エラー(#{th.title}): #{ex.message}#{url_part}")
             next
           rescue ex
             content << Pager::ContentItem.new(Pager::ContentType::Error, thread: th, message: "予期しないエラー(#{th.title}): #{ex.class}")

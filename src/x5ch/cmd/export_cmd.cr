@@ -44,7 +44,8 @@ module X5ch
           STDERR.puts "スレッドはdat落ちしています"
           exit(1)
         rescue ex
-          STDERR.puts "エラー: #{ex.message}"
+          url_part = (ex.is_a?(X5ch::FivechBrowser::BrowserError) && ex.url) ? " (URL: #{ex.url})" : ""
+          STDERR.puts "エラー: #{ex.message}#{url_part}"
           exit(1)
         end
 
