@@ -10,9 +10,11 @@ module X5ch
     FILENAME_UNSAFE_PATTERN = /[\/\\:*?"<>|\r\n]/
 
     # `X5ch export`(TUI内エクスポート機能)の保存先ディレクトリ。
-    # X5CH_EXPORT_DIR未設定時は ~/x5ch_exports。
+    # X5CH_EXPORT_DIR未設定時は「x5chを実行したカレントディレクトリ」直下の x5ch_exports。
+    # (ホームディレクトリ基準にすると、Codespaces/Colab等で実行ディレクトリと
+    #  ホームディレクトリが別階層/別マウントになっている環境で見つけにくくなるため)
     def self.export_output_dir : String
-      env_or("X5CH_EXPORT_DIR", File.join(Path.home.to_s, "x5ch_exports"))
+      env_or("X5CH_EXPORT_DIR", File.join(Dir.current, "x5ch_exports"))
     end
 
     # OSのファイル名として不正な文字を "_" に置換し、長すぎる場合は切り詰める。
