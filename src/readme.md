@@ -143,6 +143,14 @@ Most tests were re-run 3× to rule out fiber-scheduling flakiness.
   (`http://` → `hthtp://`), confirmed by direct testing. The Go port fixed
   this with a negative lookbehind; Crystal's native `Regex` lookbehind support
   let this port follow Go's fix directly.
+- **`fivechbrowser/parse.cr`**: `parse_posts` (used by the interactive pager)
+  only manually replaced `&gt;`/`&lt;`/`&amp;`, inherited as-is from the Ruby
+  original — the exact same incomplete-entity-decoding bug that
+  `fivechbrowser/export.cr`'s `extract_plain_text` had already fixed with
+  `HTML.unescape` for the archival export path. Confirmed by a user seeing
+  raw `&quot;`/`&#39;` in the TUI that the exported Markdown/JSON correctly
+  decoded. Fixed by switching `parse_posts` to `HTML.unescape` as well, so
+  both paths now decode entities identically.
 - **`fivechbrowser/export.cr`**: Crystal's `Time#to_rfc3339` always forces
   UTC, unlike Go's `time.RFC3339Nano` which preserves the original offset.
   A custom formatter (`format_rfc3339_nano`) reproduces Go's exact output,

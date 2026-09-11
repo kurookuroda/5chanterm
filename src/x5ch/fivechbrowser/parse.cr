@@ -1,3 +1,4 @@
+require "html"
 require "./types"
 
 module X5ch
@@ -61,9 +62,7 @@ module X5ch
         raw_msg = message
         raw_msg = raw_msg.gsub("<br>", "\n")
         raw_msg = raw_msg.gsub(HTML_TAG_PATTERN, " ")
-        raw_msg = raw_msg.gsub("&gt;", ">")
-        raw_msg = raw_msg.gsub("&lt;", "<")
-        raw_msg = raw_msg.gsub("&amp;", "&")
+        raw_msg = HTML.unescape(raw_msg)
         raw_msg = raw_msg.strip
 
         clean_message = raw_msg.gsub(H_RESTORE_PATTERN) { |m| "h#{m}" }
