@@ -5,6 +5,7 @@ require "./menus"
 require "./content"
 require "./search_read_cmd"
 require "./export_cmd"
+require "./export_file"
 require "../history/manager"
 require "../discord/manager"
 require "../transfer/worker"
@@ -239,6 +240,7 @@ module X5ch
           delete_history_for_thread(sio, hist, item.value)
         }
         cfg.on_queue_manage = ->(sio : Selector::TermIO) { manage_queue(sio, worker) }
+        cfg.on_export_item = export_item_handler(browser)
         cfg.help_text = help_text("thread")
 
         thread_result = Selector.run(output, fd, cfg, reader)
@@ -291,6 +293,7 @@ module X5ch
         cfg.can_enqueue = enqueue_guard(discord_mgr)
         cfg.on_enqueue = enqueue_handler(worker, hist)
         cfg.on_queue_manage = ->(sio : Selector::TermIO) { manage_queue(sio, worker) }
+        cfg.on_export_item = export_item_handler(browser)
         cfg.help_text = help_text("thread")
 
         result = Selector.run(output, fd, cfg, reader)
@@ -330,6 +333,17 @@ module X5ch
         sio.println(">> キューに追加: #{state.thread.title}")
         sleep 500.milliseconds
         {Selector::Item.new(render_thread_item(new_state.thread, new_state.is_queued), new_state), true}
+      }
+    end
+
+    # 'e'(Markdown)/'E'(JSON)キーでの、一覧上の(未オープンの)スレッドに対するエクスポート処理。
+    # スレッド一覧・全板検索結果一覧の両方で共通して使う。
+    def self.export_item_handler(browser : X5ch::FivechBrowser::Browser) : Proc(Selector::TermIO, Int32, Selector::Item(ThreadItemState), Bool, Nil)
+      ->(sio : Selector::TermIO, idx : Int32, item : Selector::Item(ThreadItemState), as_markdown : Bool) {
+        t = item.value.thread
+        message = X5ch::Cmd.perform_export(browser, t.board_url, t.dat_file, as_markdown)
+        sio.println(message)
+        sleep 1.seconds
       }
     end
 

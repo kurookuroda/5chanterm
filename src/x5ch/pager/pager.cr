@@ -58,10 +58,14 @@ module X5ch
 
     # Pager はスクロール可能なテキストビューア(Ruby版 ViPager に対応)。
     class Pager
-      def initialize(content : Array(ContentItem))
+      # on_export: 'e'(Markdown)/'E'(JSON)キー押下時に呼ばれる。
+      # 引数は(表示中スレッドのThreadInfo, Markdown出力ならtrue)、戻り値は画面に一時表示する結果メッセージ。
+      # nilなら(show_recent_streamなど複数スレッド表示時)キーは無視される。
+      def initialize(content : Array(ContentItem), @on_export : Proc(X5ch::FivechBrowser::ThreadInfo, Bool, String)? = nil)
         @lines = [] of Line
         @line_info = [] of LineInfo
         @jump_index = 0
+        @export_thread = nil.as(X5ch::FivechBrowser::ThreadInfo?)
         prepare_content(content)
       end
 
@@ -77,6 +81,7 @@ module X5ch
           case item.type
           in .header?
             th = item.thread
+            @export_thread = th if @export_thread.nil?
             add_line(" " * 60, th, 0, Style::BgBlue)
             title = th.try(&.title) || ""
             url = th.try(&.url) || ""
@@ -168,6 +173,21 @@ module X5ch
               current_line = 0
             when 'G'.ord
               current_line = max_scroll
+            when 'e'.ord, 'E'.ord
+              if (cb = @on_export) && (th = @export_thread)
+                as_markdown = byte == 'e'.ord
+                output.print("\r\n\e[Kエクスポート中...")
+                output.flush
+                message =
+                  begin
+                    cb.call(th, as_markdown)
+                  rescue ex
+                    "エクスポート失敗: #{ex.class}: #{ex.message}"
+                  end
+                output.print("\r\n\e[K#{message}\r\n")
+                output.flush
+                sleep 1.seconds
+              end
             when 0x1b # ESC
               b2 =
                 begin

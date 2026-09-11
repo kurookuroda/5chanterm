@@ -97,6 +97,35 @@ module X5ch
 
       def initialize(@source, @thread, @posts)
       end
+
+      # このJSON構造(source/thread/posts)にできるだけ対応させたMarkdown表現を作る。
+      # 見出し+メタ情報の後、レスごとに番号・名前・ID・日時・本文・reply_toを列挙する。
+      def to_markdown : String
+        String.build do |io|
+          io << "# " << thread.title << "\n\n"
+          io << "- 板: " << (thread.board_name || "(不明)") << "\n"
+          io << "- board_url: " << source.board_url << "\n"
+          io << "- thread_url: " << source.thread_url << "\n"
+          io << "- dat_file: " << source.dat_file << "\n"
+          io << "- external_id: " << thread.external_id << "\n"
+          io << "- 作成日時: " << (thread.created_at || "(不明)") << "\n"
+          io << "- 取得日時: " << source.scraped_at << "\n"
+          io << "- レス数(全体): " << thread.post_count << "\n"
+          io << "- レス数(このファイル): " << posts.size << "\n"
+          io << "\n---\n\n"
+
+          posts.each do |p|
+            io << "## " << p.num << " " << p.author_name_display
+            io << " ID:" << p.user_id unless p.user_id.empty?
+            io << " " << (p.posted_at || p.posted_at_raw) << "\n\n"
+            if reply = p.reply_to
+              io << "> Reply to: " << reply.join(", ") << "\n\n"
+            end
+            io << p.body_display << "\n\n"
+            io << "---\n\n"
+          end
+        end
+      end
     end
 
     MAIL_LINK_PATTERN     = /<a\s+[^>]*href="\/cdn-cgi\/l\/email-protection#([0-9a-fA-F]+)"[^>]*>(.*?)<\/a>/

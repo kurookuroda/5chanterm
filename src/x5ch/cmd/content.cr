@@ -1,6 +1,7 @@
 require "../fivechbrowser/browser"
 require "../history/manager"
 require "../pager/pager"
+require "./export_file"
 
 module X5ch
   module Cmd
@@ -68,9 +69,13 @@ module X5ch
         content << Pager::ContentItem.new(Pager::ContentType::SystemMsg, thread: t, message: "(新着なし - 最終レスまで既読です)")
       end
 
+      export_cb = ->(target : X5ch::FivechBrowser::ThreadInfo, as_markdown : Bool) {
+        X5ch::Cmd.perform_export(browser, target.board_url, target.dat_file, as_markdown)
+      }
+
       result =
         begin
-          Pager::Pager.new(content).start(reader, output, fd)
+          Pager::Pager.new(content, export_cb).start(reader, output, fd)
         rescue
           nil
         end

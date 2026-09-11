@@ -61,6 +61,7 @@ module X5ch
         base += " H     : [NEW] 閲覧履歴の管理(削除)\r\n"
       when "thread"
         base += " H     : [NEW] 選択したスレッドの履歴を削除\r\n"
+        base += " e / E : [NEW] 選択したスレッドをMarkdown/JSONでファイル出力\r\n"
       end
 
       base += " s     : 検索 / r : リロード / q : 終了 / b : 戻る\r\n"

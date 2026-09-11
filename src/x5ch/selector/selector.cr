@@ -134,6 +134,10 @@ module X5ch
       property on_history_manage : Proc(TermIO, Bool)? = nil
       property on_history_delete_item : Proc(TermIO, Int32, Item(T), {Item(T), Bool})? = nil
 
+      # on_export_item: 'e'(Markdown)/'E'(JSON)キー押下→番号入力後に呼ばれる。
+      # 引数は(TermIO, 選択された番号, その項目, Markdown出力ならtrue)。項目自体は変化しないため戻り値なし。
+      property on_export_item : Proc(TermIO, Int32, Item(T), Bool, Nil)? = nil
+
       # can_enqueue は'm'キー押下時、番号入力プロンプトを出す前のチェック。
       # nilなら常に許可。falseなら {ok:false, msg} を返しメッセージ表示のみでプロンプトを出さない。
       property can_enqueue : Proc({Bool, String})? = nil
@@ -190,6 +194,7 @@ module X5ch
           elsif cfg.on_history_manage
             prompt_keys += ",H"
           end
+          prompt_keys += ",e/E" if cfg.on_export_item
           prompt_keys += "] > "
 
           if needs_full_redraw
@@ -309,6 +314,22 @@ module X5ch
                 if idx && idx >= 0 && idx < filtered_items.size
                   updated, ok = cb.call(sio, idx, filtered_items[idx])
                   filtered_items[idx] = updated if ok
+                end
+              rescue InterruptedError
+                return Result(T).new(Action::Interrupt, nil, current_page)
+              end
+              needs_full_redraw = true
+            end
+          when 'e', 'E'
+            if (cb = cfg.on_export_item)
+              as_markdown = byte.chr == 'e'
+              sio.print("\r\nエクスポートする番号を入力 > ")
+              begin
+                line = sio.read_line
+                idx = line.strip.to_i?
+                if idx && idx >= 0 && idx < filtered_items.size
+                  sio.println("エクスポート中...")
+                  cb.call(sio, idx, filtered_items[idx], as_markdown)
                 end
               rescue InterruptedError
                 return Result(T).new(Action::Interrupt, nil, current_page)
