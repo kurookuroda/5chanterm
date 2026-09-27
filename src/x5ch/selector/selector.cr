@@ -159,6 +159,8 @@ module X5ch
       original_termios = X5ch::Terminal.enable_raw_mode(fd)
 
       begin
+        cols, _rows = X5ch::Terminal.get_size(fd)
+
         key_ch, err_ch = reader.channels
         sio = TermIO.new(key_ch, err_ch, output)
 
@@ -182,7 +184,7 @@ module X5ch
           display_title = cfg.title
           display_title += " (検索: #{filter_keyword})" unless filter_keyword.empty?
           status = cfg.status_line.try(&.call) || ""
-          header_str = "--- #{display_title} (#{current_page + 1}/#{total_pages})#{status} ---"
+          header_str = X5ch::Terminal.truncate_line_ansi("--- #{display_title} (#{current_page + 1}/#{total_pages})#{status} ---", cols)
 
           last_idx = Math.max(view_items.size - 1, 0)
           valid_range = "#{start_idx}-#{start_idx + last_idx}"
@@ -201,7 +203,8 @@ module X5ch
             output.print("\e[H\e[2J")
             output.print("#{header_str}\r\n")
             view_items.each_with_index do |item, i|
-              output.print("[#{start_idx + i}] #{item.text}\r\n")
+              line = X5ch::Terminal.truncate_line_ansi("[#{start_idx + i}] #{item.text}", cols)
+              output.print("#{line}\r\n")
             end
             output.print("#{prompt_keys}#{input_buffer}")
             output.flush
