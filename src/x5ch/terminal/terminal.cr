@@ -116,6 +116,73 @@ module X5ch
       width
     end
 
+    # CSIシーケンス(ESC '[' ... 終端の英字)の先頭 i から、終端文字を含む次のインデックスを返す。
+    # chars[i] が ESC '[' で始まっていない場合は i をそのまま返す。
+    private def self.skip_ansi_escape(chars : Array(Char), i : Int32) : Int32
+      return i unless chars[i] == '\e' && i + 1 < chars.size && chars[i + 1] == '['
+      j = i + 2
+      while j < chars.size && !((chars[j] >= 'a' && chars[j] <= 'z') || (chars[j] >= 'A' && chars[j] <= 'Z'))
+        j += 1
+      end
+      j += 1 if j < chars.size # 終端文字自体を含める
+      j
+    end
+
+    # 色付けなどのANSIエスケープシーケンスを保持したまま、表示幅(全角=2)基準でcols以内に
+    # 切り詰める。selector.crの項目テキストは色コードが文字列に直接埋め込まれているため
+    # (cmd/render.cr参照)、truncate_by_width をそのまま使うとエスケープシーケンスのバイトまで
+    # 表示幅としてカウントしてしまい、シーケンスの途中で切れて色指定が壊れる。そのため
+    # エスケープシーケンス自体は幅計算から除外しつつバイト列としては保持する専用の実装を用意する。
+    # 端末幅より長い行を1行のまま出力すると自動折り返しで物理行数がずれ、部分再描画
+    # (selector.crの `\e[<行>;1H` によるプロンプト行ジャンプ)の行位置計算が狂う不具合の対策として使う。
+    def self.truncate_line_ansi(s : String, cols : Int32) : String
+      return "" if cols <= 0
+      chars = s.chars
+
+      width = 0
+      fits = true
+      i = 0
+      while i < chars.size
+        j = skip_ansi_escape(chars, i)
+        if j != i
+          i = j
+          next
+        end
+        width += char_width(chars[i])
+        if width > cols
+          fits = false
+          break
+        end
+        i += 1
+      end
+      return s if fits
+
+      suffix = cols > 3 ? "..." : ""
+      budget = cols > 3 ? cols - 3 : cols
+
+      result = String::Builder.new
+      width = 0
+      i = 0
+      while i < chars.size
+        j = skip_ansi_escape(chars, i)
+        if j != i
+          (i...j).each { |k| result << chars[k] }
+          i = j
+          next
+        end
+        w = char_width(chars[i])
+        break if width + w > budget
+        result << chars[i]
+        width += w
+        i += 1
+      end
+      result << suffix
+      # 途中で切ったことで開いたままになっている可能性のある色指定をリセットする
+      # (色が使われていない行では単なる無害な追加バイトになる)。
+      result << "\e[0m"
+      result.to_s
+    end
+
     # 表示幅(全角=2、半角=1)基準で文字列をcols以内に切り詰める。
     # go-runewidthのTruncateと同じく、全角文字の途中では切らず、
     # 収まりきらない場合は末尾に suffix を付ける(付けた上でcols以内に収まるようさらに詰める)。
